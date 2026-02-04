@@ -204,8 +204,8 @@ app.get("/", (req, res) => {
   <div class="list" id="list"></div>
 
   <div class="footer">
-    Abu Bakr Masjid Reading (manual timetable)
-    <div><a class="btn" href="/api/today">View JSON</a></div>
+    Abu Bakr Masjid Reading
+    
   </div>
 
   <script src="/app.js"></script>
