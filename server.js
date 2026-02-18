@@ -1,8 +1,7 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import { getTodayTimes } from "./getTodayTimes.js";
-
+import { getTodayTimes, getTimesForDate, getTomorrowTimes } from "./getTimes.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -14,6 +13,24 @@ app.use(express.static(path.join(__dirname, "public")));
 app.get("/api/today", (req, res) => {
     try {
         res.json(getTodayTimes());
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get("/api/day", (req, res) => {
+    try {
+        const date = req.query.date; // YYYY-MM-DD
+        if (!date) return res.status(400).json({ error: "Missing ?date=YYYY-MM-DD" });
+        res.json(getTimesForDate(date));
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get("/api/tomorrow", (req, res) => {
+    try {
+        res.json(getTomorrowTimes());
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -201,8 +218,18 @@ app.get("/", (req, res) => {
     </div>
   </div>
 
-  <div class="list" id="list"></div>
+<div style="max-width:430px;margin:0 auto 10px;display:flex;gap:10px;justify-content:center;align-items:center;">
+  <button id="btnToday" class="btn" style="cursor:pointer;">Today</button>
 
+  <input
+    id="datePicker"
+    type="date"
+    class="btn"
+    style="cursor:pointer; padding:10px 12px; background:transparent;"
+  />
+</div>
+
+<div class="list" id="list"></div>
   <div class="footer">
     Abu Bakr Masjid Reading
     

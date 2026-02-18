@@ -1,18 +1,12 @@
-const TZ = "Europe/London";
-
 function pad2(n) {
     return String(n).padStart(2, "0");
 }
 
-function to12h(hhmm) {
-    // optional if you want AM/PM — currently we display HH:MM
-    return hhmm;
+function dayName(dateISO) {
+    const d = new Date(dateISO + "T00:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "long" });
 }
-
-function parseTodayTime(dateISO, hhmm) {
-    // Create a Date object for local browser time using the date + hh:mm.
-    // Since you’ll usually run this in the UK on your phone, it aligns well.
-    // Later we can do a strict timezone conversion if needed.
+function parseTime(dateISO, hhmm) {
     const [h, m] = hhmm.split(":").map(Number);
     const d = new Date(dateISO + "T00:00:00");
     d.setHours(h, m, 0, 0);
@@ -33,7 +27,6 @@ function setClockAndDate(dateISO) {
     const gregEl = document.getElementById("greg");
     const hijriEl = document.getElementById("hijri");
 
-    // Gregorian date
     const d = new Date(dateISO + "T00:00:00");
     gregEl.textContent = d.toLocaleDateString(undefined, {
         weekday: "long",
@@ -42,7 +35,6 @@ function setClockAndDate(dateISO) {
         day: "numeric",
     });
 
-    // Hijri date (built-in Intl, no library needed)
     try {
         const hijri = new Intl.DateTimeFormat("en-TN-u-ca-islamic", {
             day: "numeric",
@@ -63,7 +55,6 @@ function setClockAndDate(dateISO) {
 }
 
 function buildSchedule(dateISO, times) {
-    // Order like your screenshot
     return [
         { key: "fajr", name: "FAJR", time: times.fajr },
         { key: "sunrise", name: "SUNRISE", time: times.sunrise },
@@ -71,69 +62,40 @@ function buildSchedule(dateISO, times) {
         { key: "asr", name: "ASR", time: times.asr },
         { key: "maghrib", name: "MAGHRIB", time: times.maghrib },
         { key: "isha", name: "ISHA", time: times.isha },
-    ].map((p) => ({ ...p, when: parseTodayTime(dateISO, p.time) }));
-}
-
-function findNext(schedule, now) {
-    for (const p of schedule) {
-        if (p.when.getTime() > now.getTime()) return p;
-    }
-    // If all passed, next is tomorrow fajr (we’ll just show "Tomorrow Fajr")
-    return null;
+    ].map((p) => ({ ...p, when: parseTime(dateISO, p.time) }));
 }
 
 function renderList(schedule, now) {
     const list = document.getElementById("list");
     list.innerHTML = "";
 
-    // Determine active (last passed)
     let activeIndex = -1;
     for (let i = 0; i < schedule.length; i++) {
         if (schedule[i].when.getTime() <= now.getTime()) activeIndex = i;
     }
 
     schedule.forEach((p, idx) => {
-        const delta = p.when.getTime() - now.getTime(); // + future, - past
+        const delta = p.when.getTime() - now.getTime();
         const label = delta >= 0 ? `IN ${formatDelta(delta)}` : `${formatDelta(delta)} AGO`;
 
         const row = document.createElement("div");
         row.className = "row" + (idx === activeIndex ? " active" : "");
-
         row.innerHTML = `
       <div class="left">
         <div class="pname">${p.name}</div>
-        <div class="ptime">${to12h(p.time)}</div>
+        <div class="ptime">${p.time}</div>
       </div>
       <div class="pdelta">${label}</div>
     `;
-
         list.appendChild(row);
     });
-
-    return activeIndex;
-}
-
-function setNextUI(next, now, schedule) {
-    const nextName = document.getElementById("nextName");
-    const nextIn = document.getElementById("nextIn");
-
-    if (!next) {
-        nextName.textContent = "FAJR";
-        nextIn.textContent = "TOMORROW";
-        return;
-    }
-
-    nextName.textContent = next.name;
-    nextIn.textContent = `IN ${formatDelta(next.when.getTime() - now.getTime())}`;
 }
 
 function setRingProgress(now, schedule) {
-    // Show progress from last prayer to next prayer
     const prog = document.getElementById("prog");
-    const CIRC = 2 * Math.PI * 94; // r=94
+    const CIRC = 2 * Math.PI * 94;
     prog.setAttribute("stroke-dasharray", String(CIRC));
 
-    // last passed and next
     let prev = null;
     let next = null;
     for (const p of schedule) {
@@ -141,9 +103,7 @@ function setRingProgress(now, schedule) {
         if (p.when.getTime() > now.getTime() && !next) next = p;
     }
 
-    // If before fajr: prev is null. If after isha: next is null.
     if (!prev && next) {
-        // progress from midnight to next
         const start = new Date(schedule[0].when);
         start.setHours(0, 0, 0, 0);
         const total = next.when - start;
@@ -152,11 +112,12 @@ function setRingProgress(now, schedule) {
         prog.setAttribute("stroke-dashoffset", String(CIRC * (1 - pct)));
         return;
     }
+
     if (prev && !next) {
-        // after isha: full ring
         prog.setAttribute("stroke-dashoffset", "0");
         return;
     }
+
     if (!prev || !next) {
         prog.setAttribute("stroke-dashoffset", String(CIRC));
         return;
@@ -168,30 +129,197 @@ function setRingProgress(now, schedule) {
     prog.setAttribute("stroke-dashoffset", String(CIRC * (1 - pct)));
 }
 
-async function main() {
-    const res = await fetch("/api/today");
-    const data = await res.json();
+function setRingProgressAcrossMidnight(now, todaySchedule, tomorrowFajr) {
+    const prog = document.getElementById("prog");
+    const CIRC = 2 * Math.PI * 94;
+    prog.setAttribute("stroke-dasharray", String(CIRC));
 
-    if (data.error) {
-        document.body.innerHTML = `<div style="color:#ff6565;padding:20px;">${data.error}</div>`;
+    const ishaToday = todaySchedule.find((x) => x.key === "isha");
+    if (!ishaToday) {
+        prog.setAttribute("stroke-dashoffset", String(CIRC));
         return;
     }
 
-    const dateISO = data.date;
-    setClockAndDate(dateISO);
+    const start = ishaToday.when.getTime();
+    const end = tomorrowFajr.when.getTime();
+    const total = end - start;
+    const done = now.getTime() - start;
 
-    let schedule = buildSchedule(dateISO, data);
-
-    function tickUI() {
-        const now = new Date();
-        const next = findNext(schedule, now);
-        setNextUI(next, now, schedule);
-        renderList(schedule, now);
-        setRingProgress(now, schedule);
-    }
-
-    tickUI();
-    setInterval(tickUI, 1000);
+    const pct = Math.max(0, Math.min(1, done / total));
+    prog.setAttribute("stroke-dashoffset", String(CIRC * (1 - pct)));
 }
 
-main();
+async function fetchDate(dateISO) {
+    const r = await fetch(`/api/day?date=${dateISO}`);
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    return j;
+}
+
+async function findNextSmart(todaySchedule, now, todayISO) {
+    for (const p of todaySchedule) {
+        if (p.when.getTime() > now.getTime()) {
+            return { next: p, nextIsTomorrow: false, tomorrowFajr: null, tomorrowISO: null };
+        }
+    }
+
+    // After Isha: get tomorrow and return tomorrow fajr
+    const tmr = new Date(todayISO + "T00:00:00");
+    tmr.setDate(tmr.getDate() + 1);
+    const tomorrowISO = tmr.toISOString().slice(0, 10);
+
+    const r = await fetch(`/api/day?date=${tomorrowISO}`);
+    const tdata = await r.json();
+    if (tdata.error) throw new Error(tdata.error);
+
+    const tomorrowSchedule = buildSchedule(tomorrowISO, tdata);
+    const fajrTomorrow = tomorrowSchedule.find((x) => x.key === "fajr");
+
+    return { next: fajrTomorrow, nextIsTomorrow: true, tomorrowFajr: fajrTomorrow, tomorrowISO };
+}
+
+async function fetchDate(dateISO) {
+    const r = await fetch(`/api/day?date=${dateISO}`);
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    return j;
+}
+
+function weekdayUpper(dateISO) {
+    const d = new Date(dateISO + "T00:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "long" }).toUpperCase();
+}
+
+async function main() {
+    let mode = "today"; // "today" | "date"
+    let selectedISO = null;
+
+    // Load today's data once
+    const todayData = await (await fetch("/api/today")).json();
+    if (todayData.error) throw new Error(todayData.error);
+
+    setClockAndDate(todayData.date);
+
+    // Setup date picker
+    const datePicker = document.getElementById("datePicker");
+    const btnToday = document.getElementById("btnToday");
+
+    // default value = today
+    const todayISO = todayData.date;
+    datePicker.value = todayISO;
+
+    // Cache for selected date data to avoid refetching every second
+    const cache = new Map(); // dateISO -> data
+
+    async function getDataForSelected() {
+        if (!cache.has(selectedISO)) {
+            cache.set(selectedISO, await fetchDate(selectedISO));
+        }
+        return cache.get(selectedISO);
+    }
+
+    async function render() {
+        const now = new Date();
+
+        // DATE MODE (selected date)
+        if (mode === "date") {
+            const data = await getDataForSelected();
+            const schedule = buildSchedule(data.date, data);
+
+            document.getElementById("nextName").textContent = weekdayUpper(data.date);
+            document.getElementById("nextIn").textContent = data.date;
+
+            // Show that date's list
+            renderList(schedule, now);
+
+            // Ring can just be a "static" progress for that day
+            setRingProgress(new Date(data.date + "T00:00:00"), schedule);
+            return;
+        }
+
+        // TODAY MODE (live countdown + smart next prayer)
+        const schedule = buildSchedule(todayData.date, todayData);
+        renderList(schedule, now);
+
+        const { next, nextIsTomorrow, tomorrowFajr } = await findNextSmart(
+            schedule,
+            now,
+            todayData.date
+        );
+
+        if (nextIsTomorrow) {
+            document.getElementById("nextName").textContent = "FAJR";
+            document.getElementById("nextIn").textContent =
+                `IN ${formatDelta(next.when.getTime() - now.getTime())}`;
+            setRingProgressAcrossMidnight(now, schedule, tomorrowFajr);
+        } else {
+            document.getElementById("nextName").textContent = next.name;
+            document.getElementById("nextIn").textContent =
+                `IN ${formatDelta(next.when.getTime() - now.getTime())}`;
+            setRingProgress(now, schedule);
+        }
+    }
+
+    // Today button
+    btnToday.addEventListener("click", () => {
+        mode = "today";
+        selectedISO = null;
+        // set picker back to today (optional)
+        datePicker.value = todayISO;
+    });
+
+    // Date picker: load immediately on change
+    datePicker.addEventListener("change", async () => {
+        const picked = datePicker.value; // YYYY-MM-DD
+        if (!picked) return;
+
+        // If user picks today -> go back to today mode
+        if (picked === todayISO) {
+            mode = "today";
+            selectedISO = null;
+            return;
+        }
+
+        // IMPORTANT: don't switch UI yet.
+        // First try to fetch & validate the data.
+        try {
+            // Try to fetch immediately
+            const data = await fetchDate(picked);
+
+            // If successful, NOW switch mode/date and cache it
+            cache.set(picked, data);
+            mode = "date";
+            selectedISO = picked;
+
+            // Render once immediately
+            await render();
+        } catch (e) {
+            // If it fails: show message, then revert picker back to Today
+            alert(e.message);
+
+            // Revert picker to today
+            datePicker.value = todayISO;
+
+            // Keep today mode (circle/list remains today)
+            mode = "today";
+            selectedISO = null;
+
+            // Optional: re-render today immediately (safe)
+            await render().catch(() => { });
+        }
+    });
+
+    // Initial render + keep updating (today mode updates every second)
+    await render();
+    setInterval(() => {
+        // only auto-refresh continuously in TODAY mode
+        if (mode === "today") {
+            render().catch(() => { });
+        }
+    }, 1000);
+}
+
+main().catch((e) => {
+    document.body.innerHTML = `<div style="color:#ff6565;padding:20px;">${e.message}</div>`;
+});
+
