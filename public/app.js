@@ -249,13 +249,12 @@ async function main() {
 
         if (nextIsTomorrow) {
             document.getElementById("nextName").textContent = "FAJR";
-            document.getElementById("nextIn").textContent =
-                `IN ${formatDelta(next.when.getTime() - now.getTime())}`;
+            document.getElementById("nextIn").textContent = `${next.time} (Tomorrow)`;
             setRingProgressAcrossMidnight(now, schedule, tomorrowFajr);
         } else {
             document.getElementById("nextName").textContent = next.name;
             document.getElementById("nextIn").textContent =
-                `IN ${formatDelta(next.when.getTime() - now.getTime())}`;
+                next.time;
             setRingProgress(now, schedule);
         }
     }
